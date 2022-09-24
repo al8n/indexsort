@@ -35,7 +35,7 @@ where
 
 impl<'a, T, L> IndexSort for LessSwap<'a, T, L>
 where
-    L: Fn(usize, usize) -> bool,
+    L: Fn(&[T], usize, usize) -> bool,
 {
     fn len(&self) -> usize {
         self.data.len()
@@ -46,7 +46,7 @@ where
     }
 
     fn less(&self, i: usize, j: usize) -> bool {
-        (self.less)(i, j)
+        (self.less)(self.data, i, j)
     }
 }
 
@@ -63,7 +63,7 @@ pub trait SliceSortExt {
     #[inline]
     fn sort_slice<L>(data: &mut [Self::Item], less: L)
     where
-        L: Fn(usize, usize) -> bool,
+        L: Fn(&[Self::Item], usize, usize) -> bool,
     {
         let mut sorter = LessSwap { data, less };
         sorter.sort()
@@ -74,7 +74,7 @@ pub trait SliceSortExt {
     #[inline]
     fn sort_slice_stable<L>(data: &mut [Self::Item], less: L)
     where
-        L: Fn(usize, usize) -> bool,
+        L: Fn(&[Self::Item], usize, usize) -> bool,
     {
         let mut sorter = LessSwap { data, less };
         sorter.sort_stable()
@@ -103,7 +103,7 @@ impl<T> SliceSortExt for T {
 #[inline]
 pub fn sort_slice<T, L>(data: &mut [T], less: L)
 where
-    L: Fn(usize, usize) -> bool,
+    L: Fn(&[T], usize, usize) -> bool,
 {
     let mut sorter = LessSwap { data, less };
     sorter.sort()
@@ -114,7 +114,7 @@ where
 #[inline]
 pub fn sort_slice_stable<T, L>(data: &mut [T], less: L)
 where
-    L: Fn(usize, usize) -> bool,
+    L: Fn(&[T], usize, usize) -> bool,
 {
     let mut sorter = LessSwap { data, less };
     sorter.sort_stable()
@@ -131,19 +131,7 @@ where
 }
 
 /// Sort in reverse helper structure
-pub struct Reverse<'a, T>(&'a mut T);
-
-impl<'a, T: IndexSort> Reverse<'a, T> {
-    /// Returns a reverse sort helper structure
-    pub fn new(t: &'a mut T) -> Self {
-        Reverse(t)
-    }
-
-    /// Consume this reverse structure and return the original structure
-    pub fn into_inner(self) -> &'a mut T {
-        self.0
-    }
-}
+struct Reverse<'a, T>(&'a mut T);
 
 impl<'a, T: IndexSort> IndexSort for Reverse<'a, T> {
     fn len(&self) -> usize {
@@ -152,6 +140,22 @@ impl<'a, T: IndexSort> IndexSort for Reverse<'a, T> {
 
     fn swap(&mut self, i: usize, j: usize) {
         self.0.swap(i, j);
+    }
+
+    fn less(&self, i: usize, j: usize) -> bool {
+        self.0.less(j, i)
+    }
+}
+
+struct ImmutableReverse<'a, T>(&'a T);
+
+impl<'a, T: IndexSort> IndexSort for ImmutableReverse<'a, T> {
+    fn len(&self) -> usize {
+        self.0.len()
+    }
+
+    fn swap(&mut self, _i: usize, _j: usize) {
+        unreachable!()
     }
 
     fn less(&self, i: usize, j: usize) -> bool {
@@ -183,7 +187,7 @@ pub trait IndexSort {
     /// Swaps the elements with indexes i and j.
     fn swap(&mut self, i: usize, j: usize);
 
-    /// Sort sorts data.
+    /// Sort data.
     /// It makes one call to data.Len to determine n and O(n*log(n)) calls to
     /// data.Less and data.Swap. The sort is not guaranteed to be stable.
     #[inline]
@@ -247,139 +251,149 @@ pub trait IndexSort {
         true
     }
 
-    /// Returns the reverse order for data.
+    /// Returns whether the data is sorted in reverse order.
     #[inline]
-    fn reverse(&mut self) -> Reverse<Self>
+    fn is_reverse_sorted(&self) -> bool {
+        let n = self.len();
+        for i in (1..n).rev() {
+            if self.less(i - 1, i) {
+                return false;
+            }
+        }
+        true
+    }
+
+    /// Sorts data in reverse order.
+    /// It makes one call to data.Len to determine n and O(n*log(n)) calls to
+    /// data.Less and data.Swap. The sort is not guaranteed to be stable.
+    #[inline]
+    fn sort_reverse(&mut self)
     where
         Self: Sized,
     {
-        Reverse(self)
+        let n = self.len();
+        quick_sort(&mut Reverse(self), 0, n, max_depth(n));
+    }
+
+    /// Sorts (stable) data in reverse order.
+    ///  
+    /// Notes on stable sorting:
+    /// The used algorithms are simple and provable correct on all input and use
+    /// only logarithmic additional stack space. They perform well if compared
+    /// experimentally to other stable in-place sorting algorithms.
+    ///
+    /// Remarks on other algorithms evaluated:
+    ///  - GCC's 4.6.3 stable_sort with merge_without_buffer from libstdc++:
+    ///    Not faster.
+    ///  - GCC's __rotate for block rotations: Not faster.
+    ///  - "Practical in-place mergesort" from  Jyrki Katajainen, Tomi A. Pasanen
+    ///    and Jukka Teuhola; Nordic Journal of Computing 3,1 (1996), 27-40:
+    ///    The given algorithms are in-place, number of Swap and Assignments
+    ///    grow as n log n but the algorithm is not stable.
+    ///  - "Fast Stable In-Place Sorting with O(n) Data Moves" J.I. Munro and
+    ///    V. Raman in Algorithmica (1996) 16, 115-160:
+    ///    This algorithm either needs additional 2n bits or works only if there
+    ///    are enough different elements available to encode some permutations
+    ///    which have to be undone later (so not stable on any input).
+    ///  - All the optimal in-place sorting/merging algorithms I found are either
+    ///    unstable or rely on enough different elements in each step to encode the
+    ///    performed block rearrangements. See also "In-Place Merging Algorithms",
+    ///    Denham Coates-Evely, Department of Computer Science, Kings College,
+    ///    January 2004 and the references in there.
+    ///  - Often "optimal" algorithms are optimal in the number of assignments
+    ///    but Interface has only Swap as operation.
+    ///
+    /// Stable sorts data in ascending order as determined by the Less method,
+    /// while keeping the original order of equal elements.
+    ///
+    /// It makes one call to data.Len to determine n, O(n*log(n)) calls to
+    /// data.Less and O(n*log(n)*log(n)) calls to data.Swap.
+    #[inline]
+    fn sort_stable_reverse(&mut self)
+    where
+        Self: Sized,
+    {
+        let n = self.len();
+        stable(&mut Reverse(self), n);
     }
 }
 
 #[inline]
-fn swap_slice<T>(data: &mut [T], i: usize, j: usize) {
+fn __swap_slice<T>(data: &mut [T], i: usize, j: usize) {
     data.swap(i, j)
 }
 
 #[inline]
-const fn swap_len<T>(data: &[T]) -> usize {
+const fn __slice_len<T>(data: &[T]) -> usize {
     data.len()
 }
 
-macro_rules! impl_index_sort_for_numbers {
-    ($($t:ty)*) => ($(
-        #[cfg(feature = "alloc")]
-        impl IndexSort for ::alloc::vec::Vec<$t> {
-            fn len(&self) -> usize {
-                ::alloc::vec::Vec::len(self)
-            }
+#[cfg(feature = "alloc")]
+impl<T: PartialOrd + core::fmt::Debug> IndexSort for ::alloc::vec::Vec<T> {
+    fn len(&self) -> usize {
+        __slice_len(self)
+    }
 
-            fn less(&self, i: usize, j: usize) -> bool {
-                self[i] < self[j]
-            }
+    fn less(&self, i: usize, j: usize) -> bool {
+        self[i] < self[j]
+    }
 
-            fn swap(&mut self, i: usize, j: usize) {
-                swap_slice(self, i, j);
-            }
-        }
-
-        #[cfg(feature = "alloc")]
-        impl<'a> IndexSort for &'a mut ::alloc::vec::Vec<$t> {
-            fn len(&self) -> usize {
-                ::alloc::vec::Vec::len(self)
-            }
-
-            fn less(&self, i: usize, j: usize) -> bool {
-                self[i] < self[j]
-            }
-
-            fn swap(&mut self, i: usize, j: usize) {
-                swap_slice(self, i, j);
-            }
-        }
-
-        impl<'a> IndexSort for &'a mut [$t] {
-            fn len(&self) -> usize {
-                swap_len(self)
-            }
-
-            fn less(&self, i: usize, j: usize) -> bool {
-                self[i] < self[j]
-            }
-
-            fn swap(&mut self, i: usize, j: usize) {
-                swap_slice(self, i, j);
-            }
-        }
-    )*);
+    fn swap(&mut self, i: usize, j: usize) {
+        __swap_slice(self, i, j);
+    }
 }
 
-impl_index_sort_for_numbers! {
-    u8 u16 u32 u64 u128 usize
-    i8 i16 i32 i64 i128 isize
+impl<'a, T: PartialOrd + core::fmt::Debug> IndexSort for &'a mut [T] {
+    fn len(&self) -> usize {
+        __slice_len(self)
+    }
+
+    fn less(&self, i: usize, j: usize) -> bool {
+        self[i] < self[j]
+    }
+
+    fn swap(&mut self, i: usize, j: usize) {
+        __swap_slice(self, i, j);
+    }
 }
 
-macro_rules! impl_index_sort_for_floats {
-    ($($t:ty)*) => ($(
-        impl IndexSort for ::alloc::vec::Vec<$t> {
-            fn len(&self) -> usize {
-                ::alloc::vec::Vec::len(self)
-            }
+impl<const N: usize, T: PartialOrd + core::fmt::Debug> IndexSort for [T; N] {
+    fn len(&self) -> usize {
+        __slice_len(self)
+    }
 
-            fn less(&self, i: usize, j: usize) -> bool {
-                self[i] < self[j] || (self[i].is_nan() && !self[j].is_nan())
-            }
+    fn less(&self, i: usize, j: usize) -> bool {
+        self[i] < self[j]
+    }
 
-            fn swap(&mut self, i: usize, j: usize) {
-                swap_slice(self, i, j);
-            }
-        }
-
-        impl<'a> IndexSort for &'a mut ::alloc::vec::Vec<$t> {
-            fn len(&self) -> usize {
-                ::alloc::vec::Vec::len(self)
-            }
-
-            fn less(&self, i: usize, j: usize) -> bool {
-                self[i] < self[j] || (self[i].is_nan() && !self[j].is_nan())
-            }
-
-            fn swap(&mut self, i: usize, j: usize) {
-                swap_slice(self, i, j);
-            }
-        }
-
-        impl<'a> IndexSort for &'a mut [$t] {
-            fn len(&self) -> usize {
-                swap_len(self)
-            }
-
-            fn less(&self, i: usize, j: usize) -> bool {
-                self[i] < self[j] || (self[i].is_nan() && !self[j].is_nan())
-            }
-
-            fn swap(&mut self, i: usize, j: usize) {
-                swap_slice(self, i, j);
-            }
-        }
-    )*);
+    fn swap(&mut self, i: usize, j: usize) {
+        __swap_slice(self, i, j);
+    }
 }
 
-impl_index_sort_for_floats! {
-    f32 f64
+#[cfg(feature = "alloc")]
+impl<T: PartialOrd + core::fmt::Debug> IndexSort for ::alloc::boxed::Box<[T]> {
+    fn len(&self) -> usize {
+        __slice_len(self)
+    }
+
+    fn less(&self, i: usize, j: usize) -> bool {
+        self[i] < self[j]
+    }
+
+    fn swap(&mut self, i: usize, j: usize) {
+        __swap_slice(self, i, j);
+    }
 }
 
 /// Sorts data[a:b] using insertion sort.
 #[inline]
 fn insertion_sort(data: &mut impl IndexSort, a: usize, b: usize) {
     for i in a + 1..b {
-        for j in (a + 1..=i).rev() {
-            if data.less(j, j - 1) {
-                data.swap(j, j - 1);
-            } else {
-                break;
-            }
+        let mut j = i;
+        while j > a && data.less(j, j - 1) {
+            data.swap(j, j - 1);
+            j -= 1;
         }
     }
 }
@@ -472,7 +486,6 @@ fn do_pivot(data: &mut impl IndexSort, lo: usize, hi: usize) -> (usize, usize) {
         median_of_three(data, hi - 1, hi - 1 - s, hi - 1 - 2 * s);
     }
     median_of_three(data, lo, m, hi - 1);
-
     // Invariants are:
     //	data[lo] = pivot (set up by ChoosePivot)
     //	data[lo < i < a] < pivot
@@ -547,7 +560,7 @@ fn do_pivot(data: &mut impl IndexSort, lo: usize, hi: usize) -> (usize, usize) {
                 b -= 1;
             }
             // data[a] < pivot
-            while a < b && !data.less(a, pivot) {
+            while a < b && data.less(a, pivot) {
                 a += 1;
             }
             if a >= b {
@@ -559,7 +572,6 @@ fn do_pivot(data: &mut impl IndexSort, lo: usize, hi: usize) -> (usize, usize) {
             b -= 1;
         }
     }
-
     // Swap pivot into middle
     data.swap(pivot, b - 1);
     (b - 1, c)
@@ -585,7 +597,6 @@ fn quick_sort(data: &mut impl IndexSort, mut a: usize, mut b: usize, mut max_dep
             b = mlo; // i.e., quickSort(data, a, mlo)
         }
     }
-
     if b - a > 1 {
         // Do ShellSort pass with gap 6
         // It could be written in this simplified form cause b-a <= 12
@@ -600,7 +611,7 @@ fn quick_sort(data: &mut impl IndexSort, mut a: usize, mut b: usize, mut max_dep
 
 #[inline]
 fn stable(data: &mut impl IndexSort, n: usize) {
-    let mut block_size = 20;
+    let mut block_size = 5;
     let (mut a, mut b) = (0, block_size);
     while b <= n {
         insertion_sort(data, a, b);
@@ -609,16 +620,17 @@ fn stable(data: &mut impl IndexSort, n: usize) {
     }
 
     insertion_sort(data, a, n);
-
     while block_size < n {
-        (a, b) = (0, 2 * block_size);
+        a = 0;
+        b = 2 * block_size;
         while b <= n {
             syn_merge(data, a, a + block_size, b);
             a = b;
             b += 2 * block_size;
         }
-        if a + block_size < n {
-            syn_merge(data, a, a + block_size, n);
+        let m = a + block_size;
+        if m < n {
+            syn_merge(data, a, m, n);
         }
         block_size *= 2;
     }
@@ -656,7 +668,7 @@ fn syn_merge(data: &mut impl IndexSort, a: usize, m: usize, b: usize) {
         let mut j = b;
         while i < j {
             let h = (i + j) >> 1;
-            if data.less(a, h) {
+            if data.less(h, a) {
                 i = h + 1;
             } else {
                 j = h;
@@ -689,8 +701,10 @@ fn syn_merge(data: &mut impl IndexSort, a: usize, m: usize, b: usize) {
         }
 
         // Swap values until data[m] reaches the position i.
-        for k in (i + 1..m + 1).rev() {
+        let mut k = m;
+        while k > i {
             data.swap(k, k - 1);
+            k -= 1;
         }
         return;
     }
@@ -702,7 +716,7 @@ fn syn_merge(data: &mut impl IndexSort, a: usize, m: usize, b: usize) {
     let p = n - 1;
     while start < r {
         let c = (start + r) >> 1;
-        if !data.less(c, p - c) {
+        if !data.less(p - c, c) {
             start = c + 1;
         } else {
             r = c;
@@ -734,7 +748,7 @@ fn rotate(data: &mut impl IndexSort, a: usize, m: usize, b: usize) {
 
     while i != j {
         if i > j {
-            swap_range(data, m - 1, m, j);
+            swap_range(data, m - i, m, j);
             i -= j;
         } else {
             swap_range(data, m - i, m + j - i, i);
@@ -757,4 +771,53 @@ fn max_depth(n: usize) -> usize {
         i >>= 1;
     }
     depth * 2
+}
+
+/// Sort data.
+/// It makes one call to `data.len` to determine n and `O(n*log(n))` calls to
+/// `data.less` and `data.swap`. The sort is not guaranteed to be stable.
+#[inline]
+pub fn sort(data: &mut impl IndexSort) {
+    let n = data.len();
+    quick_sort(data, 0, n, max_depth(n));
+}
+
+/// Sort data (stable).
+#[inline]
+pub fn sort_stable(data: &mut impl IndexSort) {
+    let n = data.len();
+    stable(data, n);
+}
+
+/// Sort data in reverse order.
+#[inline]
+pub fn sort_reverse(data: &mut impl IndexSort) {
+    let n = data.len();
+    quick_sort(&mut Reverse(data), 0, n, max_depth(n));
+}
+
+/// Sort data in reverse order (stable).
+#[inline]
+pub fn sort_stable_reverse(data: &mut impl IndexSort) {
+    let n = data.len();
+    stable(&mut Reverse(data), n);
+}
+
+/// Golang's `sort.Search` in Rust.
+#[inline]
+pub fn search<F>(n: usize, mut f: F) -> usize
+where
+    F: FnMut(usize) -> bool,
+{
+    let mut i = 0;
+    let mut j = n;
+    while i < j {
+        let h = (i + j) >> 1;
+        if !f(h) {
+            i = h + 1;
+        } else {
+            j = h;
+        }
+    }
+    i
 }
