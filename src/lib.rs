@@ -1,7 +1,9 @@
-//! Yet another sort crate, porting Golang sort package to Rust.
+//! Yet another sort crate (in place), porting Golang sort package to Rust.
 //!
 #![no_std]
 #![deny(missing_docs)]
+#![cfg_attr(docsrs, feature(doc_cfg))]
+#![cfg_attr(docsrs, allow(unused_attributes))]
 
 #[cfg(feature = "alloc")]
 extern crate alloc;
