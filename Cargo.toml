@@ -22,3 +22,7 @@ rand = "0.8"
 [package.metadata.docs.rs]
 all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
+
+[[bench]]
+harness = false
+name = "is_sorted"

@@ -40,6 +40,29 @@ fn test_sort_int_slice() {
 }
 
 #[test]
+fn test_is_sort_2() {
+    let mut data = INTS.to_vec();
+    IndexSort::sort(&mut data);
+    assert!(IndexSort::is_sorted2(&data));
+
+    let mut data = INTS.to_vec().repeat(7);
+    IndexSort::sort_stable(&mut data);
+    assert!(IndexSort::is_sorted2(&data));
+
+    let mut data = (0..10000)
+        .map(|_| rand::random::<isize>())
+        .collect::<Vec<_>>();
+    IndexSort::sort_stable(&mut data);
+    assert!(IndexSort::is_sorted2(&data));
+    
+    let mut data = (0..1000000)
+        .map(|_| rand::random::<isize>())
+        .collect::<Vec<_>>();
+    IndexSort::sort_stable(&mut data);
+    assert!(IndexSort::is_sorted2(&data));
+}
+
+#[test]
 fn test_sort_f64_slice() {
     let mut data = FLOATS.to_vec();
     IndexSort::sort(&mut data);

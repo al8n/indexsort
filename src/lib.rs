@@ -253,6 +253,25 @@ pub trait IndexSort {
         true
     }
 
+    /// Returns whether the data is sorted. O(N/2) version
+    #[inline]
+    fn is_sorted2(&self) -> bool {
+        let len = self.len();
+
+        let n = (len >> 1) + 1;
+        for i in 1..n {
+            if self.less(i, i - 1) {
+                return false;
+            }
+            let tail_off = len - i;
+
+            if self.less(tail_off, tail_off - 1) {
+                return false;
+            }
+        }
+        true
+    }
+
     /// Returns whether the data is sorted in reverse order.
     #[inline]
     fn is_reverse_sorted(&self) -> bool {
