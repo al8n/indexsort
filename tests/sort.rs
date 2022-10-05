@@ -39,6 +39,16 @@ fn test_sort_int_slice() {
     assert!(IndexSort::is_sorted(&data));
 }
 
+macro_rules! try_swap {
+    ($vec:ident, $a:literal, $b:literal, $block:block) => {
+        {
+            $vec.swap($a, $b);
+            $block;
+            $vec.swap($a, $b);
+        }
+    };
+}
+
 #[test]
 fn test_is_sort_2() {
     let mut data = INTS.to_vec();
@@ -60,6 +70,13 @@ fn test_is_sort_2() {
         .collect::<Vec<_>>();
     IndexSort::sort_stable(&mut data);
     assert!(IndexSort::is_sorted2(&data));
+
+    let mut data = vec![0, 1, 2, 3, 4, 5];
+    assert!(IndexSort::is_sorted2(&data));
+    try_swap!(data, 0, 1, {assert!(!IndexSort::is_sorted2(&data))});
+    try_swap!(data, 1, 2, {assert!(!IndexSort::is_sorted2(&data))});
+    try_swap!(data, 2, 3, {assert!(!IndexSort::is_sorted2(&data))});
+    try_swap!(data, 4, 5, {assert!(!IndexSort::is_sorted2(&data))});
 }
 
 #[test]
