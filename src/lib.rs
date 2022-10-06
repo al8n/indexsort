@@ -13,12 +13,12 @@ struct LessSwap<'a, T, L> {
     less: L,
 }
 
-struct InmutableLessSwap<'a, T, L> {
+struct ImmutableLessSwap<'a, T, L> {
     data: &'a [T],
     less: L,
 }
 
-impl<'a, T, L> IndexSort for InmutableLessSwap<'a, T, L>
+impl<'a, T, L> IndexSort for ImmutableLessSwap<'a, T, L>
 where
     L: Fn(usize, usize) -> bool,
 {
@@ -88,7 +88,7 @@ pub trait SliceSortExt {
     where
         L: Fn(usize, usize) -> bool,
     {
-        let sorter = InmutableLessSwap { data, less };
+        let sorter = ImmutableLessSwap { data, less };
         sorter.is_sorted()
     }
 }
@@ -128,7 +128,7 @@ pub fn slice_is_sorted<T, L>(data: &[T], less: L) -> bool
 where
     L: Fn(usize, usize) -> bool,
 {
-    let sorter = InmutableLessSwap { data, less };
+    let sorter = ImmutableLessSwap { data, less };
     sorter.is_sorted()
 }
 
@@ -247,6 +247,25 @@ pub trait IndexSort {
         let n = self.len();
         for i in (1..n).rev() {
             if self.less(i, i - 1) {
+                return false;
+            }
+        }
+        true
+    }
+
+    /// Returns whether the data is sorted. O(N/2) version
+    #[inline]
+    fn is_sorted2(&self) -> bool {
+        let len = self.len();
+
+        let n = (len >> 1) + 1;
+        for i in 1..n {
+            if self.less(i, i - 1) {
+                return false;
+            }
+            let tail_off = len - i;
+
+            if self.less(tail_off, tail_off - 1) {
                 return false;
             }
         }
